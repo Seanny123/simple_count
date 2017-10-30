@@ -4,7 +4,7 @@ from nengo.networks.workingmemory import InputGatedMemory as WM
 
 class MemNet(spa.Network):
     def __init__(self, mem_vocab, label=None):
-        super(MemNet, self).__init__(label)
+        super().__init__(label)
 
         with self:
             self.mem = WM(100, mem_vocab.dimensions, difference_gain=15)

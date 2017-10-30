@@ -21,8 +21,7 @@ max_num = max_sum - 2
 
 number_list, num_vocab = gen_vocab(number_dict, max_num, D, rng)
 
-#join_num = "+".join(number_list[0:max_num])
-join_num = "ONE"
+join_num = "+".join(number_list[0:max_num])
 
 
 with spa.Network(label="Counter", seed=0) as model:
@@ -36,46 +35,48 @@ with spa.Network(label="Counter", seed=0) as model:
     input_keys = number_list[:max_num-1]
     output_keys = number_list[1:max_num]
 
-    """Result circuit"""
-    ## Incrementing memory
-    model.res_assoc = HeteroMap(num_vocab, input_keys=input_keys, output_keys=output_keys)
-    ## Starting memory
-    model.count_res = MemNet(num_vocab, label="count_res")
-    ## Increment result memory
-    model.res_mem = MemNet(num_vocab, label="res_mem")
-    ## Cleanup memory
-    model.rmem_assoc = Cleanup(num_vocab)
+    with spa.Network(label="Result") as res:
+        # Incrementing memory
+        res.res_assoc = HeteroMap(num_vocab, input_keys=input_keys, output_keys=output_keys)
+        # Starting memory
+        res.count_res = MemNet(num_vocab, label="count_res")
+        # Increment result memory
+        res.res_mem = MemNet(num_vocab, label="res_mem")
+        # Cleanup memory
+        res.rmem_assoc = Cleanup(num_vocab)
 
-    """Total circuit"""
-    ## Total memory
-    model.tot_assoc = HeteroMap(num_vocab, input_keys=input_keys, output_keys=output_keys)
-    ## Starting memory
-    model.count_tot = MemNet(num_vocab, label="count_tot")
-    ## Increment result memory
-    model.tot_mem = MemNet(num_vocab, label="tot_mem")
-    ## Cleanup memory
-    model.tmem_assoc = Cleanup(num_vocab)
-    model.ans_assoc = Cleanup(num_vocab)
+    with spa.Network(label="Total") as tot:
+        # Total memory
+        tot.tot_assoc = HeteroMap(num_vocab, input_keys=input_keys, output_keys=output_keys)
+        # Starting memory
+        tot.count_tot = MemNet(num_vocab, label="count_tot")
+        # Increment result memory
+        tot.tot_mem = MemNet(num_vocab, label="tot_mem")
+        # Cleanup memory
+        tot.tmem_assoc = Cleanup(num_vocab)
+        tot.ans_assoc = Cleanup(num_vocab)
 
-    ## The memory that says when to stop incrementing
-    model.count_fin = MemNet(num_vocab, label="count_fin")
+    with spa.Network(label="Final Goal") as fin:
+        # The memory that says when to stop incrementing
+        fin.count_fin = MemNet(num_vocab, label="count_fin")
 
-    """Comparison circuit"""
-    ## State for easier insertion into Actions after threshold
-    model.tot_fin_simi = spa.Scalar()
-    model.comp_tot_fin = spa.Compare(num_vocab)
-    # this network is only used during the on_input action, is it really necessary?
-    model.fin_assoc = Cleanup(num_vocab)
+        """Comparison circuit"""
+        # State for easier insertion into Actions after threshold
+        fin.tot_fin_simi = spa.Scalar()
+        fin.comp_tot_fin = spa.Compare(num_vocab)
+        # TODO: this network is only used during the on_input action, is it really necessary?
+        fin.fin_assoc = Cleanup(num_vocab)
 
-    """Compares that set the speed of the increment"""
-    ## Compare for loading into start memory
-    model.comp_load_res = spa.Compare(num_vocab)
-    ## Compare for loading into incrementing memory
-    model.comp_inc_res = spa.Compare(num_vocab)
-    ## Cleanup for compare
-    model.comp_assoc = Cleanup(num_vocab)
+    with spa.Network(label="Increment Control") as inc_comp:
+        """Compares that set the speed of the increment"""
+        # Compare for loading into start memory
+        inc_comp.comp_load_res = spa.Compare(num_vocab)
+        # Compare for loading into incrementing memory
+        inc_comp.comp_inc_res = spa.Compare(num_vocab)
+        # Cleanup for compare
+        inc_comp.comp_assoc = Cleanup(num_vocab)
 
-    ## Increment for compare and input
+    # Increment for compare and input
     model.gen_inc_assoc = HeteroMap(num_vocab, input_keys=input_keys, output_keys=output_keys)
 
     model.running = spa.Scalar()
@@ -88,76 +89,76 @@ with spa.Network(label="Counter", seed=0) as model:
 
     main_actions = spa.Actions(f"""
         ifmax (dot(model.q1, {join_num}) + dot(model.q2, {join_num}))*0.5 as 'on_input':
-            model.gen_inc_assoc -> model.count_res
+            model.gen_inc_assoc -> res.count_res
             model.q1 -> model.gen_inc_assoc
 
-            ONE -> model.count_tot
-            model.fin_assoc -> model.count_fin
-            2.5*model.q2 -> model.fin_assoc
+            ONE -> tot.count_tot
+            fin.fin_assoc -> fin.count_fin
+            2.5*model.q2 -> fin.fin_assoc
             RUN -> model.op_state
 
-        ifmax (model.running - model.tot_fin_simi + 1.25*model.comp_inc_res - model.comp_load_res) as 'cmp_fail':
+        ifmax (model.running - fin.tot_fin_simi + 1.25*inc_comp.comp_inc_res - inc_comp.comp_load_res) as 'cmp_fail':
             0.5*RUN - NONE -> model.op_state
 
-            2.5*model.count_res -> model.rmem_assoc
-            2.5*model.count_tot -> model.tmem_assoc
+            2.5*res.count_res -> res.rmem_assoc
+            2.5*tot.count_tot -> tot.tmem_assoc
 
-            0 -> model.count_res.gate
-            0 -> model.count_tot.gate
+            0 -> res.count_res.gate
+            0 -> tot.count_tot.gate
             0 -> model.op_state.gate
-            0 -> model.count_fin.gate
+            0 -> fin.count_fin.gate
 
-            model.res_mem -> model.comp_load_res.input_a
-            model.comp_assoc -> model.comp_load_res.input_b
-            2.5*model.count_res -> model.comp_assoc
+            res.res_mem -> inc_comp.comp_load_res.input_a
+            inc_comp.comp_assoc -> inc_comp.comp_load_res.input_b
+            2.5*res.count_res -> inc_comp.comp_assoc
         
-        ifmax (0.5*model.running + model.tot_fin_simi) as 'cmp_good':
-            8*model.count_res -> model.ans_assoc
+        ifmax (0.5*model.running + fin.tot_fin_simi) as 'cmp_good':
+            8*res.count_res -> tot.ans_assoc
             0.5*RUN -> model.op_state
 
-            0 -> model.count_res.gate
-            0 -> model.count_tot.gate
+            0 -> res.count_res.gate
+            0 -> tot.count_tot.gate
             0 -> model.op_state.gate
-            0 -> model.count_fin.gate
+            0 -> fin.count_fin.gate
 
-        ifmax (0.3*model.running + 1.2*model.comp_load_res - model.comp_inc_res) as 'increment':
-            2.5*model.res_mem -> model.res_assoc
-            2.5*model.tot_mem -> model.tot_assoc
+        ifmax (0.3*model.running + 1.2*inc_comp.comp_load_res - inc_comp.comp_inc_res) as 'increment':
+            2.5*res.res_mem -> res.res_assoc
+            2.5*tot.tot_mem -> tot.tot_assoc
 
-            0 -> model.res_mem.gate
-            0 -> model.tot_mem.gate
+            0 -> res.res_mem.gate
+            0 -> tot.tot_mem.gate
             0 -> model.op_state.gate
-            0 -> model.count_fin.gate
+            0 -> fin.count_fin.gate
 
-            0.75*ONE -> model.comp_load_res.input_a
-            0.75*ONE -> model.comp_load_res.input_b
-            model.gen_inc_assoc -> model.comp_inc_res.input_a
-            2.5*model.res_mem -> model.gen_inc_assoc
-            model.count_res -> model.comp_inc_res.input_b
+            0.75*ONE -> inc_comp.comp_load_res.input_a
+            0.75*ONE -> inc_comp.comp_load_res.input_b
+            model.gen_inc_assoc -> inc_comp.comp_inc_res.input_a
+            2.5*res.res_mem -> model.gen_inc_assoc
+            res.count_res -> inc_comp.comp_inc_res.input_b
 
         always:
             dot(model.op_state, RUN) -> model.running
 
-            model.rmem_assoc -> model.res_mem
-            model.tmem_assoc -> model.tot_mem
+            res.rmem_assoc -> res.res_mem
+            tot.tmem_assoc -> tot.tot_mem
 
-            model.res_assoc -> model.count_res
-            model.tot_assoc -> model.count_tot
+            res.res_assoc -> res.count_res
+            tot.tot_assoc -> tot.count_tot
 
-            model.count_fin -> model.comp_tot_fin.input_a
-            0.5*model.count_tot -> model.comp_tot_fin.input_b
+            fin.count_fin -> fin.comp_tot_fin.input_a
+            0.5*tot.count_tot -> fin.comp_tot_fin.input_b
     """)
 
     """Threshold preventing premature influence from comp_tot_fin similarity"""
     with thresh_conf:
         thresh_ens = nengo.Ensemble(100, 1)
 
-    nengo.Connection(model.comp_tot_fin.output, thresh_ens)
-    nengo.Connection(thresh_ens, model.tot_fin_simi.input)
+    nengo.Connection(fin.comp_tot_fin.output, thresh_ens)
+    nengo.Connection(thresh_ens, fin.tot_fin_simi.input)
 
     """Because the answer is being continuously output, we've got to threshold it by the comp_tot_fin similarity"""
     ans_boost = nengo.networks.Product(200, dimensions=D, input_magnitude=2)
     ans_boost.label = "ans_boost"
-    nengo.Connection(model.ans_assoc.output, ans_boost.A)
+    nengo.Connection(tot.ans_assoc.output, ans_boost.A)
     nengo.Connection(thresh_ens, ans_boost.B, transform=np.ones((D, 1)))
     nengo.Connection(ans_boost.output, model.answer.input, transform=2.5)
