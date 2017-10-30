@@ -21,7 +21,8 @@ max_num = max_sum - 2
 
 number_list, num_vocab = gen_vocab(number_dict, max_num, D, rng)
 
-join_num = "+".join(number_list[0:max_num])
+#join_num = "+".join(number_list[0:max_num])
+join_num = "ONE"
 
 
 with spa.Network(label="Counter", seed=0) as model:
@@ -62,22 +63,22 @@ with spa.Network(label="Counter", seed=0) as model:
     """Comparison circuit"""
     ## State for easier insertion into Actions after threshold
     model.tot_fin_simi = spa.Scalar()
-    model.comp_tot_fin = spa.Compare(D)
+    model.comp_tot_fin = spa.Compare(num_vocab)
     # this network is only used during the on_input action, is it really necessary?
     model.fin_assoc = Cleanup(num_vocab)
 
     """Compares that set the speed of the increment"""
     ## Compare for loading into start memory
-    model.comp_load_res = spa.Compare(D)
+    model.comp_load_res = spa.Compare(num_vocab)
     ## Compare for loading into incrementing memory
-    model.comp_inc_res = spa.Compare(D)
+    model.comp_inc_res = spa.Compare(num_vocab)
     ## Cleanup for compare
     model.comp_assoc = Cleanup(num_vocab)
 
     ## Increment for compare and input
     model.gen_inc_assoc = HeteroMap(num_vocab, input_keys=input_keys, output_keys=output_keys)
 
-    model.running = spa.Transcode(input_vocab=num_vocab)
+    model.running = spa.Scalar()
 
     # Rule documentation:
     # If the input isn't blank, read it in
@@ -109,7 +110,7 @@ with spa.Network(label="Counter", seed=0) as model:
             model.res_mem -> model.comp_load_res.input_a
             model.comp_assoc -> model.comp_load_res.input_b
             2.5*model.count_res -> model.comp_assoc
-
+        
         ifmax (0.5*model.running + model.tot_fin_simi) as 'cmp_good':
             8*model.count_res -> model.ans_assoc
             0.5*RUN -> model.op_state
@@ -158,6 +159,5 @@ with spa.Network(label="Counter", seed=0) as model:
     ans_boost = nengo.networks.Product(200, dimensions=D, input_magnitude=2)
     ans_boost.label = "ans_boost"
     nengo.Connection(model.ans_assoc.output, ans_boost.A)
-    nengo.Connection(thresh_ens, ans_boost.B,
-                     transform=np.ones((D, 1)))
+    nengo.Connection(thresh_ens, ans_boost.B, transform=np.ones((D, 1)))
     nengo.Connection(ans_boost.output, model.answer.input, transform=2.5)
