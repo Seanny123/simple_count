@@ -161,7 +161,3 @@ with spa.Network(label="Counter", seed=0) as model:
     nengo.Connection(thresh_ens, ans_boost.B,
                      transform=np.ones((D, 1)))
     nengo.Connection(ans_boost.output, model.answer.input, transform=2.5)
-
-# nengo.Connection(env.q_in[D:], model.q1.input)
-# nengo.Connection(env.q_in[:D], model.q2.input)
-# nengo.Connection(env.op_in, model.op_state.mem.input)

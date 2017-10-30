@@ -16,4 +16,4 @@ class MemNet(spa.Network):
 
         self.declare_input(self.gate, None)
         self.declare_input(self.input, mem_vocab)
-        self.declare_input(self.output, mem_vocab)
+        self.declare_output(self.output, mem_vocab)
