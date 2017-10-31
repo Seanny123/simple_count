@@ -25,8 +25,11 @@ join_num = "+".join(number_list[0:max_num])
 
 
 with spa.Network(label="Counter", seed=0) as model:
+
+    # Starting point
     model.q1 = spa.Transcode(output_vocab=num_vocab)
-    model.q2 = spa.Transcode(output_vocab=num_vocab)
+    # The memory that says when to stop incrementing
+    model.count_fin = spa.Transcode(output_vocab=num_vocab)
 
     model.answer = spa.Transcode(output_vocab=num_vocab)
 
@@ -45,26 +48,10 @@ with spa.Network(label="Counter", seed=0) as model:
         # Cleanup memory
         res.rmem_assoc = Cleanup(num_vocab)
 
-    with spa.Network(label="Total") as tot:
-        # Total memory
-        tot.tot_assoc = HeteroMap(num_vocab, input_keys=input_keys, output_keys=output_keys)
-        # Starting memory
-        tot.count_tot = MemNet(num_vocab, label="count_tot")
-        # Increment result memory
-        tot.tot_mem = MemNet(num_vocab, label="tot_mem")
-        # Cleanup memory
-        tot.tmem_assoc = Cleanup(num_vocab)
-        tot.ans_assoc = Cleanup(num_vocab)
-
     with spa.Network(label="Final Goal") as fin:
-        # The memory that says when to stop incrementing
-        fin.count_fin = MemNet(num_vocab, label="count_fin")
-
-        """Comparison circuit"""
         # State for easier insertion into Actions after threshold
-        fin.tot_fin_simi = spa.Scalar()
-        fin.comp_tot_fin = spa.Compare(num_vocab)
-        fin.fin_assoc = Cleanup(num_vocab)
+        fin.res_fin_simi = spa.Scalar()
+        fin.comp_res_fin = spa.Compare(num_vocab)
 
     with spa.Network(label="Increment Control") as inc_comp:
         """Compares that set the speed of the increment"""
@@ -87,14 +74,9 @@ with spa.Network(label="Counter", seed=0) as model:
     # Increment memory transfer
 
     main_actions = spa.Actions(f"""
-        ifmax (dot(model.q1, {join_num}) + dot(model.q2, {join_num}))*0.5 as 'on_input':
+        ifmax dot(model.q1, {join_num})*0.5 as 'on_input':
             model.q1 -> model.gen_inc_assoc
             model.gen_inc_assoc -> res.count_res
-
-            ONE -> tot.count_tot
-
-            2.5*model.q2 -> fin.fin_assoc
-            fin.fin_assoc -> fin.count_fin
 
             RUN -> model.op_state
 
@@ -102,12 +84,9 @@ with spa.Network(label="Counter", seed=0) as model:
             0.5*RUN - NONE -> model.op_state
 
             2.5*res.count_res -> res.rmem_assoc
-            2.5*tot.count_tot -> tot.tmem_assoc
 
             0 -> res.count_res.gate
-            0 -> tot.count_tot.gate
             0 -> model.op_state.gate
-            0 -> fin.count_fin.gate
 
             res.res_mem -> inc_comp.comp_load_res.input_a
             inc_comp.comp_assoc -> inc_comp.comp_load_res.input_b
@@ -141,26 +120,24 @@ with spa.Network(label="Counter", seed=0) as model:
             dot(model.op_state, RUN) -> model.running
 
             res.rmem_assoc -> res.res_mem
-            tot.tmem_assoc -> tot.tot_mem
 
             res.res_assoc -> res.count_res
-            tot.tot_assoc -> tot.count_tot
 
-            fin.count_fin -> fin.comp_tot_fin.input_a
-            0.5*tot.count_tot -> fin.comp_tot_fin.input_b
+            fin.count_fin -> fin.comp_res_fin.input_a
+            0.5*res.count_res -> fin.comp_res_fin.input_b
     """)
 
     """Threshold preventing premature influence from comp_tot_fin similarity"""
     with thresh_conf:
         thresh_ens = nengo.Ensemble(100, 1)
 
-    nengo.Connection(fin.comp_tot_fin.output, thresh_ens)
-    nengo.Connection(thresh_ens, fin.tot_fin_simi.input)
+    nengo.Connection(fin.comp_res_fin.output, thresh_ens)
+    nengo.Connection(thresh_ens, fin.res_fin_simi.input)
 
     """Because the answer is being continuously output, we've got to threshold it by the comp_tot_fin similarity"""
     ans_boost = nengo.networks.Product(200, dimensions=D, input_magnitude=2)
     ans_boost.label = "ans_boost"
-    nengo.Connection(tot.ans_assoc.output, ans_boost.A)
+    nengo.Connection(res.ans_assoc.output, ans_boost.A)
     nengo.Connection(thresh_ens, ans_boost.B, transform=np.ones((D, 1)))
     nengo.Connection(ans_boost.output, model.answer.input, transform=2.5)
 
