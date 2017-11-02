@@ -12,7 +12,8 @@ with spa.Network() as model:
     model.input = spa.Transcode(output_vocab=vocab)
     model.state = spa.State(vocab, subdimensions=dimensions, represent_identity=False)
     assert len(model.state.all_networks) == 1
-    state_net = model.state.all_networks[0]
+    assert len(model.state.all_networks[0].ea_ensembles) == 1
+    state_ens = model.state.all_networks[0].ea_ensembles[0]
 
     model.bg = spa.BasalGanglia(action_count=3)
     model.thal = spa.Thalamus(action_count=3)
@@ -23,9 +24,9 @@ with spa.Network() as model:
     # conditions
     nengo.Connection(model.state.output, model.bg.input[0],
                      transform=[vocab["A"].v])
-    nengo.Connection(model.state.output, model.bg.input[1],
-                     transform=[vocab["B"].v])
-                     #transform=np.zeros((1, dimensions)))
+    conn = nengo.Connection(state_ens, model.bg.input[1],
+                            transform=np.zeros((1, dimensions)),
+                            learning_rule_type=nengo.PES())
     nengo.Connection(model.state.output, model.bg.input[2],
                      transform=[vocab["C"].v])
 
