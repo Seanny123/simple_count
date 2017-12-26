@@ -81,12 +81,6 @@ with spa.Network(label="Counter", seed=0) as model:
 
     model.running = spa.Scalar()
 
-    # Rule documentation:
-    # If the input isn't blank, read it in
-    # If not done, prepare next increment
-    # If we're done incrementing write it to the answer
-    # Increment memory transfer
-
     dot(model.op_state, sym.RUN) >> model.running
 
     res.rmem_assoc >> res.res_mem
@@ -99,6 +93,7 @@ with spa.Network(label="Counter", seed=0) as model:
     0.5 * tot.count_tot >> fin.comp_tot_fin.input_b
 
     with spa.ActionSelection() as act_sel:
+        # If the input isn't blank, read it in
         ifmax(dot(model.q1, num_vocab.parse(join_num)) + dot(model.q2, num_vocab.parse(join_num)),
               model.q1 >> model.gen_inc_assoc,
               model.gen_inc_assoc >> res.count_res,
@@ -110,6 +105,7 @@ with spa.Network(label="Counter", seed=0) as model:
 
               sym.RUN >> model.op_state)
 
+        # If not done, prepare next increment
         ifmax(model.running - fin.tot_fin_simi + 1.25 * inc_comp.comp_inc_res - inc_comp.comp_load_res,
               0.5 * sym.RUN - sym.NONE >> model.op_state,
 
@@ -125,6 +121,7 @@ with spa.Network(label="Counter", seed=0) as model:
               inc_comp.comp_assoc >> inc_comp.comp_load_res.input_b,
               2.5 * res.count_res >> inc_comp.comp_assoc)
 
+        # If we're done incrementing write it to the answer
         ifmax(0.5 * model.running + fin.tot_fin_simi,
               8 * res.count_res >> tot.ans_assoc,
               0.5 * sym.RUN >> model.op_state,
@@ -134,6 +131,7 @@ with spa.Network(label="Counter", seed=0) as model:
               0 >> model.op_state.gate,
               0 >> fin.count_fin.gate)
 
+        # Increment memory transfer
         ifmax(0.3 * model.running + 1.2 * inc_comp.comp_load_res - inc_comp.comp_inc_res,
               2.5 * res.res_mem >> res.res_assoc,
               2.5 * tot.tot_mem >> tot.tot_assoc,
@@ -163,5 +161,5 @@ with spa.Network(label="Counter", seed=0) as model:
     nengo.Connection(thresh_ens, ans_boost.B, transform=np.ones((D, 1)))
     nengo.Connection(ans_boost.output, model.answer.input, transform=2.5)
 
-# with nengo.Simulator(model) as sim:
-#     sim.run(5)
+with nengo.Simulator(model) as sim:
+    sim.run(5)
