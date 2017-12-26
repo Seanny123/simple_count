@@ -3,6 +3,7 @@ from mem_net import MemNet
 from assoc_net import Cleanup, HeteroMap
 
 import nengo_spa as spa
+from nengo_spa import sym, ifmax, dot
 import nengo
 from nengo.presets import ThresholdingEnsembles
 import numpy as np
@@ -86,69 +87,67 @@ with spa.Network(label="Counter", seed=0) as model:
     # If we're done incrementing write it to the answer
     # Increment memory transfer
 
-    main_actions = spa.Actions(f"""
-        ifmax (dot(model.q1, {join_num}) + dot(model.q2, {join_num}))*0.5 as 'on_input':
-            model.q1 -> model.gen_inc_assoc
-            model.gen_inc_assoc -> res.count_res
+    dot(model.op_state, sym.RUN) >> model.running
 
-            ONE -> tot.count_tot
+    res.rmem_assoc >> res.res_mem
+    tot.tmem_assoc >> tot.tot_mem
 
-            2.5*model.q2 -> fin.fin_assoc
-            fin.fin_assoc -> fin.count_fin
+    res.res_assoc >> res.count_res
+    tot.tot_assoc >> tot.count_tot
 
-            RUN -> model.op_state
+    fin.count_fin >> fin.comp_tot_fin.input_a
+    0.5 * tot.count_tot >> fin.comp_tot_fin.input_b
 
-        elifmax (model.running - fin.tot_fin_simi + 1.25*inc_comp.comp_inc_res - inc_comp.comp_load_res) as 'cmp_fail':
-            0.5*RUN - NONE -> model.op_state
+    with spa.ActionSelection() as act_sel:
+        ifmax(dot(model.q1, num_vocab.parse(join_num)) + dot(model.q2, num_vocab.parse(join_num)),
+              model.q1 >> model.gen_inc_assoc,
+              model.gen_inc_assoc >> res.count_res,
 
-            2.5*res.count_res -> res.rmem_assoc
-            2.5*tot.count_tot -> tot.tmem_assoc
+              sym.ONE >> tot.count_tot,
 
-            0 -> res.count_res.gate
-            0 -> tot.count_tot.gate
-            0 -> model.op_state.gate
-            0 -> fin.count_fin.gate
+              2.5 * model.q2 >> fin.fin_assoc,
+              fin.fin_assoc >> fin.count_fin,
 
-            res.res_mem -> inc_comp.comp_load_res.input_a
-            inc_comp.comp_assoc -> inc_comp.comp_load_res.input_b
-            2.5*res.count_res -> inc_comp.comp_assoc
-        
-        elifmax (0.5*model.running + fin.tot_fin_simi) as 'cmp_good':
-            8*res.count_res -> tot.ans_assoc
-            0.5*RUN -> model.op_state
+              sym.RUN >> model.op_state)
 
-            0 -> res.count_res.gate
-            0 -> tot.count_tot.gate
-            0 -> model.op_state.gate
-            0 -> fin.count_fin.gate
+        ifmax(model.running - fin.tot_fin_simi + 1.25 * inc_comp.comp_inc_res - inc_comp.comp_load_res,
+              0.5 * sym.RUN - sym.NONE >> model.op_state,
 
-        elifmax (0.3*model.running + 1.2*inc_comp.comp_load_res - inc_comp.comp_inc_res) as 'increment':
-            2.5*res.res_mem -> res.res_assoc
-            2.5*tot.tot_mem -> tot.tot_assoc
+              2.5 * res.count_res >> res.rmem_assoc,
+              2.5 * tot.count_tot >> tot.tmem_assoc,
 
-            0 -> res.res_mem.gate
-            0 -> tot.tot_mem.gate
-            0 -> model.op_state.gate
-            0 -> fin.count_fin.gate
+              0 >> res.count_res.gate,
+              0 >> tot.count_tot.gate,
+              0 >> model.op_state.gate,
+              0 >> fin.count_fin.gate,
 
-            0.75*ONE -> inc_comp.comp_load_res.input_a
-            0.75*ONE -> inc_comp.comp_load_res.input_b
-            model.gen_inc_assoc -> inc_comp.comp_inc_res.input_a
-            2.5*res.res_mem -> model.gen_inc_assoc
-            res.count_res -> inc_comp.comp_inc_res.input_b
+              res.res_mem >> inc_comp.comp_load_res.input_a,
+              inc_comp.comp_assoc >> inc_comp.comp_load_res.input_b,
+              2.5 * res.count_res >> inc_comp.comp_assoc)
 
-        always:
-            dot(model.op_state, RUN) -> model.running
+        ifmax(0.5 * model.running + fin.tot_fin_simi,
+              8 * res.count_res >> tot.ans_assoc,
+              0.5 * sym.RUN >> model.op_state,
 
-            res.rmem_assoc -> res.res_mem
-            tot.tmem_assoc -> tot.tot_mem
+              0 >> res.count_res.gate,
+              0 >> tot.count_tot.gate,
+              0 >> model.op_state.gate,
+              0 >> fin.count_fin.gate)
 
-            res.res_assoc -> res.count_res
-            tot.tot_assoc -> tot.count_tot
+        ifmax(0.3 * model.running + 1.2 * inc_comp.comp_load_res - inc_comp.comp_inc_res,
+              2.5 * res.res_mem >> res.res_assoc,
+              2.5 * tot.tot_mem >> tot.tot_assoc,
 
-            fin.count_fin -> fin.comp_tot_fin.input_a
-            0.5*tot.count_tot -> fin.comp_tot_fin.input_b
-    """)
+              0 >> res.res_mem.gate,
+              0 >> tot.tot_mem.gate,
+              0 >> model.op_state.gate,
+              0 >> fin.count_fin.gate,
+
+              0.75 * sym.ONE >> inc_comp.comp_load_res.input_a,
+              0.75 * sym.ONE >> inc_comp.comp_load_res.input_b,
+              model.gen_inc_assoc >> inc_comp.comp_inc_res.input_a,
+              2.5 * res.res_mem >> model.gen_inc_assoc,
+              res.count_res >> inc_comp.comp_inc_res.input_b)
 
     """Threshold preventing premature influence from comp_tot_fin similarity"""
     with thresh_conf:
@@ -164,12 +163,5 @@ with spa.Network(label="Counter", seed=0) as model:
     nengo.Connection(thresh_ens, ans_boost.B, transform=np.ones((D, 1)))
     nengo.Connection(ans_boost.output, model.answer.input, transform=2.5)
 
-# for the Nengo GUI
-for net in model.all_networks:
-    if net.label is not None and "->" in net.label:
-        net.label = ""
-
 # with nengo.Simulator(model) as sim:
 #     sim.run(5)
-
-main_actions[0].bg.label = "bg"
